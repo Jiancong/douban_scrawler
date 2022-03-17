@@ -12,7 +12,8 @@ req = requests.Session()
 for cookie in cookies:
     req.cookies.set(cookie['name'], cookie['value'])
 
-output_dirs="../output/"
+output_dir="./outputs/"
+
 
 def get_metadata():
     """Scrape the metadata of the group """
@@ -21,27 +22,35 @@ def get_metadata():
     r = req.get(url, headers=headers)
     soup = bs(r.content, 'lxml')
 
-    df = pd.DataFrame(columns=['name', 'admin', 'admin_url', 'created_time', 'group_labels', 'members_count', 'recently_joined'])
+    df = pd.DataFrame(columns=['name', 'admin', 'admin_url', 'created_time', 'group_labels', 'member_count', 'recently_joined'])
 
     data = {}
+    #print(soup)
     # -------------
     info = soup.find('div', class_='group-info-item group-loc')
     admin = info.find('a')
-
     admin_name = admin.text.strip()
+    print("admin_name:" + admin_name)
+
     admin_url = admin['href']
+    print("admin_url:" + admin_url)
+
     # to find date
     date = re.search('[\d][\d][\d][\d]-[\d][\d]-[\d][\d]', info.text.strip()).group()
-    # --------------
+    print("date:" + date)
 
+    # --------------
     label_tag = soup.find('div', class_='group-info-item group-tags')
     labels = []
     for label in label_tag.find_all('a'): # to get the labels of group
         labels.append(label.text.strip())
+
+    print("labels:" + "/".join(labels))
     #---------------------
 
     member_count = soup.find('div', class_='mod side-nav').text.strip()
     member_count = re.search('(\d+)', member_count).group()  # Number of members
+    print("member_count:" + member_count)
     #-----------------------
 
     recently_joined = []
@@ -60,7 +69,7 @@ def get_metadata():
 
     df = df.append(data, ignore_index=True)
 
-    df.to_excel('metadata.xlsx', index=False)
+    df.to_excel(output_dir+'group_metadata.xlsx', index=False)
 
 
 def task1A():
@@ -73,17 +82,20 @@ def task1A():
     df = pd.DataFrame(columns=columns) # Containg all users
     books_info = pd.DataFrame(columns=book_columns) # Books_info dataframe for all users
     movies_info = pd.DataFrame(columns=movie_columns) # movies info dataframe for all users
-    network_info= pd.DataFrame(columns=network_columns) # dataframe containing followers and following for all users
+    social_network_info= pd.DataFrame(columns=network_columns) # dataframe containing followers and following for all users
     
     member_id = 1
     for page in range(0, 45000, 36):
+        print("page:", page)
         url = f'https://www.douban.com/group/707650/members?start={page}'
         r = req.get(url, headers=headers)
         soup = bs(r.content, 'lxml')
         
-            
         members = soup.find_all('li', class_='member-item')
+
         for member in members:
+            print("member_id: ", member_id)
+            print("member:", member)
             div = member.find('div', class_='name')
             
             name = div.a.text.strip()
@@ -91,18 +103,30 @@ def task1A():
 
             link = member.find('a')['href']
 
+            print("link:", link)
+
             p = req.get(link, headers=headers)
             page_soup = bs(p.content, 'lxml')     
-            
 
             try:
-                desc = page_soup.find('span', {'id':'intro_display'}).text.strip()
+                find_desc = page_soup.find('span', {'id':'intro_display'})
+                if find_desc:
+                    desc = find_desc.text.strip()
+                else:
+                    print("Cant find intro_display, print page_soup")
+                    print(page_soup)
+                    desc = None
             except AttributeError:
                 desc = None
 
             try:
                 date_joined = page_soup.find('div', class_='user-info')
-                date_joined = re.search('[\d][\d][\d][\d]-[\d][\d]-[\d][\d]', date_joined.text.strip()).group()
+                if date_joined:
+                    date_joined = re.search('[\d][\d][\d][\d]-[\d][\d]-[\d][\d]', date_joined.text.strip()).group()
+                else:
+                    print("Can't find user-info, print page_soup")
+                    print(page_soup)
+                    date_joined = None
             except AttributeError:
                 date_joined = None
 
@@ -131,19 +155,27 @@ def task1A():
             # No.of.Followers	No.of.People following	No.of.Movies reviewed/rated
 
             try:
-                followers = page_soup.find('p', class_='rev-link').text.strip()
-                followers = re.search('(\d+)', followers).group()
-                data['No.of.Followers'] = followers
+                find_followers = page_soup.find('p', class_='rev-link')
+                if find_followers:
+                    followers = find_followers.text.strip()
+                    followers = re.search('(\d+)', followers).group()
+                    data['No.of.Followers'] = followers
+                else:
+                    print("No followers found, print page_soup")
+                    print(page_soup)
+                    data['No.of.Followers'] = None
             except AttributeError:
                 data['No.of.Followers'] = None
             
             try:
+
                 following = page_soup.select_one('#friend > h2 > span').text.strip()
                 following = re.search('(\d+)', following).group()
                 data['No.of.People following'] = following  
             except AttributeError:
                 data['No.of.People following'] = None 
-
+                print("No people following, print page_soup")
+                print(page_soup)
 
             try:
                 reviews = page_soup.select_one('#review > h2 > span > a').text.strip()
@@ -151,8 +183,9 @@ def task1A():
                 data['No.of.Movies reviewed/rated'] = reviews 
             except AttributeError:
                 data['No.of.Movies reviewed/rated'] = None 
+                print("No movies reviewd/rated, print page_soup")
+                print(page_soup)
 
-            
             
             task1_joins(link, member_id) # joined groups info for each user
             books_info = task1C_books(books_info, link) # books_info
@@ -160,19 +193,20 @@ def task1A():
             task1C_behaviour(books_info, member_id, link) # get behaviour
             
             # get followers and following
-            network_info = task1D(network_info, link, member_id, name)
+            social_network_info = task1D(social_network_info, link, member_id, name)
            
+            print("data:", data)
+
             df = df.append(data, ignore_index=True)
             member_id += 1
             
     
     # Create the excel files
-    books_info.to_excel('books_info.xlsx', index=False)
-    movies_info.to_excel('movies_info.xlsx', index=False)
-    network_info.to_excel('task1D.xlsx', index=False)
+    books_info.to_excel(output_dir + 'books_info.xlsx', index=False)
+    movies_info.to_excel(output_dir + 'movies_info.xlsx', index=False)
+    social_network_info.to_excel(output_dir + 'task1D.xlsx', index=False)
             
-       
-    df.to_excel('task1A.xlsx', index=False)
+    df.to_excel(output_dir+'task1A.xlsx', index=False)
     
 
 def task1C_books(books_info, link): 
@@ -187,7 +221,8 @@ def task1C_books(books_info, link):
         # Modify the url for the category whether do, wish or collect
         reading = link + category
         reading = reading.replace('www', 'book')
-        
+
+        print("task1C_books, reading link:" + reading)        
         
         try:
             r = req.get(reading, headers=headers)
@@ -195,9 +230,10 @@ def task1C_books(books_info, link):
             r = req.get(reading, headers=headers)            
         soup = bs(r.content, 'lxml')
         
-        
+        counter = 1
         book_links = [li.find('a')['href'] for li in soup.find_all('li', class_='subject-item')]
         for book in book_links:
+            print("book #{}: {}".format(str(counter), book))
             b = req.get(book, headers=headers)
             bsoup = bs(b.content, 'lxml')
     
@@ -221,8 +257,14 @@ def task1C_books(books_info, link):
             info = bsoup.find('div', {'id':'info'})
             
             try:
-                author = info.find('a').text.strip()
-                data['Author'] = author
+                find_author = info.find('a')
+                if find_author:
+                    author = find_author.text.strip()
+                    data['Author'] = author
+                else:
+                    data['Author'] = None
+                    print("Author not found, print info.")
+                    print(info)
             except AttributeError:
                 pass
             
@@ -247,13 +289,11 @@ def task1C_books(books_info, link):
             try: publisher = re.search('出版社: (.*)', info).group(1)
             except AttributeError: publisher = None
     
-            
             data['Release Date'] = date
             data['ISBN'] = isbn
             data['Pages'] = pages
             data['Price'] = price
             data['Publisher'] = publisher
-            
             
             try:
                 desc = bsoup.find('div', class_='related_info').find('span', class_='all hidden').text.strip()
@@ -281,7 +321,8 @@ def task1C_books(books_info, link):
                 pass
         
             books_info = books_info.append(data, ignore_index=True)
-            
+            print("books_link counter:" + str(counter))
+            counter+=1
         
     
     return books_info
@@ -299,15 +340,20 @@ def task1C_movies(movies_info, link):
         
         movie_links = [div.find('a')['href'] for div in soup.find_all('div', class_='item')]
 
+        counter = 1
         for movie in movie_links:
+            print("movie #{}: {}".format(str(counter), movie))
+
             m = req.get(movie, headers=headers)
             msoup = bs(m.content, 'lxml')
 
-            name = msoup.select_one('#content > h1').text.strip()    
-            # Validate if the movie already exists
-            if len(movies_info.loc[movies_info['Name'] == name]) != 0:
+            try:
+                name = msoup.select_one('#content > h1').text.strip()    
+                # Validate if the movie already exists
+                if len(movies_info.loc[movies_info['Name'] == name]) != 0:
+                    continue
+            except AttributeError:
                 continue
-            
           
             info = msoup.find('div', {'id':'info'})
 
@@ -341,8 +387,6 @@ def task1C_movies(movies_info, link):
                     }
 #            data['ID'] = (movies_info['ID'].max() + 1) if not movies_info.empty else 1
 #            data['Name'] = name
-
-            
             
             ratings = msoup.find('div', class_='rating_wrap clearbox')    
             try: 
@@ -363,8 +407,8 @@ def task1C_movies(movies_info, link):
                 pass
             
             movies_info = movies_info.append(data, ignore_index=True)
-            
-
+            print("movies link counter:" + str(counter))
+            counter += 1
         
     return movies_info
 
@@ -382,7 +426,6 @@ def task1C_behaviour(books_info, member_id, link):
     reviews = soup.find_all('div', class_='main review-item')
     
     for review in reviews:
-
         data = {}
         a = review.find('a', class_='subject-img')['href']
         book = books_info.loc[books_info['url'] == a.strip()]
@@ -390,7 +433,13 @@ def task1C_behaviour(books_info, member_id, link):
         if not book.empty:
             book = book.iloc[0]
             data['id'] = book['ID']
-            data['name'] = book['Name']
+            if 'Name' not in book:
+                print("Name is not present, print book.")
+                print(book)
+                data['name'] = None
+                pass
+            else:
+                data['name'] = book['Name']
             data['ReadStatus(read/reading/plan_to_read)'] = book['ReadStatus']
 
             
@@ -407,10 +456,9 @@ def task1C_behaviour(books_info, member_id, link):
         data['rating'] = rating
         data['review'] = content.text.strip()
         
-
         behave_df = behave_df.append(data, ignore_index=True)
 
-    behave_df.to_excel(f'u{member_id}_behaviours_info.xlsx', index=False)
+    behave_df.to_excel(output_dir + f'u{member_id}_behaviours_info.xlsx', index=False)
 
 
 def task1D(network_info, link, member_id, name):
@@ -444,6 +492,7 @@ def task1D(network_info, link, member_id, name):
 def task1_joins(link, member_id):
     link += 'joins'
     link = link.replace('/people', '/group/people')
+    print("task1_joins link:", link)
     
     r = req.get(link, headers=headers)
     soup = bs(r.content, 'lxml')
@@ -454,7 +503,7 @@ def task1_joins(link, member_id):
     
     df = pd.Series(names, name='group_name')
     
-    df.to_excel(f'u{member_id}_joined_groups_info.xlsx', index=False)
+    df.to_excel(output_dir + f'u{member_id}_joined_groups_info.xlsx', index=False)
     
 
     
@@ -490,7 +539,7 @@ def task2A():
         
         
     
-    df.to_excel('task2A.xlsx', index=False)
+    df.to_excel(output_dir + 'task2A.xlsx', index=False)
 
 def task2B(link):
     
@@ -530,7 +579,7 @@ def task2B(link):
         data['Original_post_text'] = None
         
         
-    df.to_excel(f'task2B_{topic_id}.xlsx', index=False)
+    df.to_excel(output_dir + f'task2B_{topic_id}.xlsx', index=False)
     
 
 get_metadata()
