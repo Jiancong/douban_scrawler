@@ -16,6 +16,9 @@ from mysql.connector import errorcode
 from random import randint
 from time import sleep
 
+SLEEP_MIN=2
+SLEEP_MAX=8
+
 headers = {"User-Agent" : "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36"}
  
 cookies = pickle.load(open("assets/cookies.pkl", "rb"))
@@ -226,12 +229,12 @@ def task1A(connection):
 
 
             # get followers and following
-            social_network_info = task1D(social_network_info, link, name)
+            social_network_info = task1D(social_network_info, link, name, connection)
 
             #user_df = user_df.append(data, ignore_index=True)
             member_id += 1
 
-            sleep(randint(5,25))
+            sleep(randint(SLEEP_MIN, SLEEP_MAX))
             
     
     books_info_df = pd.read_sql("select * from douban.books_info", connection)
@@ -413,6 +416,7 @@ def task1C_books(books_info, link, connection):
 
                 print("books_link counter:" + str(counter))
                 counter+=1
+                sleep(randint(SLEEP_MIN,SLEEP_MAX))
 
         # Second Pass
         print("Book Second Pass....")
@@ -474,6 +478,7 @@ def task1C_books(books_info, link, connection):
 
                 insert_data_to_db(data, "user_books_behaviours", connection)
                 print("Insert record successfully.")
+                sleep(randint(SLEEP_MIN, SLEEP_MAX))
 
     return books_info
 
@@ -656,6 +661,7 @@ def task1C_movies(movies_info, link, connection):
 
                 print("movies link counter:" + str(counter))
                 counter += 1
+                sleep(randint(SLEEP_MIN, SLEEP_MAX))
         
         # Second Pass
         print("Movie Second Pass....")
@@ -709,6 +715,7 @@ def task1C_movies(movies_info, link, connection):
 
                 insert_data_to_db(data, "user_movies_behaviours", connection)
                 print("Insert record successfully.")
+                sleep(randint(SLEEP_MIN,SLEEP_MAX))
         
     return movies_info
 
@@ -778,7 +785,7 @@ def task1C_books_behaviour(books_info, link, connection):
     #behave_df.to_excel(output_dir + f'u{member_id}_behaviours_info.xlsx', index=False)
 
 
-def task1D(network_info, link, name):
+def task1D(network_info, link, name, connection):
     """ Task 1d"""
     followers_link = link + 'contacts' # Link to followers
     following_link = link + 'rev_contacts' #Link to following
@@ -792,7 +799,6 @@ def task1D(network_info, link, name):
     fwsoup = bs(r.content, 'lxml')
     # Scrape followers
     followers = [dl.dd.text.strip() for dl in fwsoup.find_all('dl', class_='obu')]
-
     
     r = req.get(following_link, headers=headers)
     ffsoup = bs(r.content, 'lxml')
@@ -827,15 +833,14 @@ def task1_joins(link, member_id):
     
     df.to_excel(output_dir + f'u{member_id}_joined_groups_info.xlsx', index=False)
     
-
-    
 def task2A():
-    df = pd.DataFrame(columns=['topic_id', 'topic', 'author', 'comments', 'last_comment_time'])
+    df = pd.DataFrame(columns=['TopicID', 'TopicName', 'Author', 'Comments', 'LastCommentTime'])
     
     page = 0
     while page <= 35000:
         print(page)
         url = f'https://www.douban.com/group/707650/discussion?start={page}&type=new'
+
         r = req.get(url, headers=headers)
         print('gotten')
         soup = bs(r.content, features='lxml')
@@ -847,24 +852,32 @@ def task2A():
                 
                 link = row.find('a')['href']
                 topic_id = re.search('/(\d+)/', link).group(1)
-                data['topic_id'] = topic_id
-                data['topic'], data['author'], data['comments'], data['last_comment_time'] = [td.text.strip() for td in row.find_all('td')]
+                data['TopicID'] = topic_id
+                data['TopicName'], data['Author'], data['Comments'], data['LastCommentTime'] = [td.text.strip() for td in row.find_all('td')]
+
+                length, _ = get_data_from_db("TopicID", topic_id, "discussion_threads_statistics", connection) 
+                if length > 0:
+                    print("this discuss thread info have been in database, pass.")
+                    continue
+                else:
+                    insert_data_to_db(data, "discussion_threads_statistics", connection)
+                    print("Insert record successfully.")
                 
-                df = df.append(data, ignore_index=True)
-                task2B(link)
-                break
+                #df = df.append(data, ignore_index=True)
+                task2B(link, connection)
+                sleep(randint(SLEEP_MIN,SLEEP_MAX))
             
             page += 25
         except AttributeError:
             print('Retrying: ', page)
             continue
     
-    df.to_excel(output_dir + 'task2A.xlsx', index=False)
+    #df.to_excel(output_dir + 'task2A.xlsx', index=False)
 
-def task2B(link):
+def task2B(link, connection):
     
     topic_id = re.search('/(\d+)/', link).group(1)
-    topic_columns = ['Original_post_text', 'Replies', 'User_name_who_replies', 'No.of.Likes', 'Datetime']
+    topic_columns = ['OriginalPostText', 'Replies', 'UserNameWhoReplies', 'No_of_Likes', 'DateTime', 'url']
     df = pd.DataFrame(columns=topic_columns)
     
     data = {}
@@ -874,32 +887,34 @@ def task2B(link):
     
     # Original post text
     content = soup.find('div', class_='rich-content topic-richtext').text.strip()
-    data['Original_post_text'] = content
-    
+    data['OriginalPostText'] = content
     
     for reply in soup.find_all('li', class_='clearfix comment-item reply-item'):
         data['Replies'] = reply.find('p', 'reply-content').text.strip()#  Reply text
         
         head = reply.find('h4')
-        data['User_name_who_replies'] = head.a.text.strip()
+        data['UserNameWhoReplies'] = head.a.text.strip()
         
-        data['Datetime'] = head.find('span', class_='pubtime').text.strip()
+        data['PubTime'] = head.find('span', class_='pubtime').text.strip()
+        data['url'] = link
         
         try:
             # Likes doenst show every time
             likes = reply.find('div', class_='operation-div').text.strip()
             likes = re.search('(\d+)', likes).group()
-            data['No.of.Likes'] = likes
+            data['No_of_Likes'] = likes
         except AttributeError:
             pass
         
-        df = df.append(data, ignore_index=True)
+
+        insert_data_to_db(data, "topic_infos", connection)
+        #df = df.append(data, ignore_index=True)
         data = {}
         # So it wont repeat post_text for other rows
-        data['Original_post_text'] = None
+        data['OriginalPostText'] = None
         
         
-    df.to_excel(output_dir + f'task2B_{topic_id}.xlsx', index=False)
+    #df.to_excel(output_dir + f'task2B_{topic_id}.xlsx', index=False)
     
 if __name__ == '__main__':
     try:
@@ -912,7 +927,7 @@ if __name__ == '__main__':
 
         get_metadata()
         task1A(connection) 
-        task2A()
+        #task2A()
 
     except mysql.connector.Error as err:
         if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
