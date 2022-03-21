@@ -1,6 +1,5 @@
 #coding=utf8
-# original by Abdullahi A.
-# modified by Jiancong Xie
+# by Jiancong Xie
 # date: 2022/3/18
 
 import requests, re, pickle, threading
@@ -221,11 +220,17 @@ def task1A(connection):
             print("data:", data)
             insert_data_to_db(data, "users", connection)
             
-            task1_joins(link, data['Name']) # joined groups info for each user
+#            task1_joins(link, data['Name']) # joined groups info for each user
+#            task1C_books(books_info, link, connection) # books_info
+#            print("task1C_movies begin...")
+#            task1C_movies(movies_info, link, connection) # get movie info
+#            print("task1C_movies end...")
+#
+            joins = threading.Thread(target=task1_joins, args=(link, data['Name'])) # joined groups info for each user
+            joins.start()
             task1C_books(books_info, link, connection) # books_info
-            print("task1C_movies begin...")
             task1C_movies(movies_info, link, connection) # get movie info
-            print("task1C_movies end...")
+
 
 
             # get followers and following
@@ -434,12 +439,15 @@ def task1C_books(books_info, link, connection):
                 book_link = li_subject_item.find('a')['href']
 
                 print(f"user_link:{link}, book_link:{book_link}")
-                if get_data_from_db2("UserUrl", link, "BookISBN", book_info_map[book_link][0] , "user_books_behaviours", connection) > 0:
+                if book_link in book_info_map and get_data_from_db2("UserUrl", link, "BookISBN", book_info_map[book_link][0] , "user_books_behaviours", connection) > 0:
                     print("this book behaviour have beed in database, pass.")
                     continue
 
                 data = {}
+                
                 data['BookName'] = book_info_map[book_link][1]
+                if data['BookName'] is None:
+                    data['BookName'] = 'Unknown'
                 data['BookISBN'] = book_info_map[book_link][0]
                 data['ReadStatus'] = category
 
@@ -469,6 +477,10 @@ def task1C_books(books_info, link, connection):
                     comment = comment_obj.text.strip()
                 else:
                     comment = ""
+
+                if rating == "" and comment == "" :
+                    print("The book behaviour is invalid behaviours, pass.")
+                    continue
 
                 data['Review'] = comment
                 data['Rating'] = rating
@@ -593,15 +605,21 @@ def task1C_movies(movies_info, link, connection):
                 
                 info = msoup.find('div', {'id':'info'})
 
-                try: director = re.search('导演: (.*)', info.text.strip()).group(1)
-                except AttributeError: director = None
+                try: 
+                    director = re.search('导演: (.*)', info.text.strip()).group(1)
+                    director = director[:255]
+                except AttributeError: 
+                    director = None
 
-                try: actors = info.find('span', class_='actor').find('span', class_='attrs').text.strip()
-                except AttributeError: actors = None
+                try: 
+                    actors = info.find('span', class_='actor').find('span', class_='attrs').text.strip()
+                    actors = actors[:SHORT_DESC_LENGTH]
+                except AttributeError: 
+                    actors = None
 
                 try: imdb = re.search('IMDb: (.*)', info.text.strip()).group(1)
                 except AttributeError: 
-                    imdb = "tt_random_" + str(randint(1,100000))
+                    imdb = "tt_random_" + str(randint(1,1000000))
 
                 try: date = info.select_one('span[property="v:initialReleaseDate"]').text.strip()
                 except AttributeError: date = None
@@ -676,8 +694,13 @@ def task1C_movies(movies_info, link, connection):
 
             for div_subject_item in div_subject_items:
                 movie_link = div_subject_item.find('a')['href']
-                if get_data_from_db2("UserUrl", link, "MovieIMDB", movie_info_map[movie_link][0], "user_movies_behaviours", connection) > 0:
+                print("movie_link:", movie_link)
+                if movie_link in movie_info_map and get_data_from_db2("UserUrl", link, "MovieIMDB", movie_info_map[movie_link][0], "user_movies_behaviours", connection) > 0:
                     print("this movie behaviour have been in database, pass.")
+                    continue
+
+                if movie_link not in movie_info_map:
+                    print("error happened, pass...")
                     continue
                 
                 data = {}
@@ -696,6 +719,10 @@ def task1C_movies(movies_info, link, connection):
                     comment = comment_obj.text.strip()
                 else:
                     comment = ""
+
+                if rating == "" and comment == "":
+                    print("The movie behaviours is invalid, pass...")
+                    continue
 
                 data["Review"] = comment
                 data["Rating"] = rating
