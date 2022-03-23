@@ -15,8 +15,10 @@ from mysql.connector import errorcode
 from random import randint
 from time import sleep
 
-SLEEP_MIN=2
-SLEEP_MAX=8
+SLEEP_MIN=10
+SLEEP_MAX=30
+
+SCRAPE_URL = "https://www.douban.com/group/694601/"
 
 headers = {"User-Agent" : "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36"}
  
@@ -43,7 +45,8 @@ print("*" * 20)
 def get_metadata():
     """Scrape the metadata of the group """
     
-    url = 'https://www.douban.com/group/707650/'
+    #url = 'https://www.douban.com/group/707650/'
+    url = SCRAPE_URL
     r = req.get(url, headers=headers)
     soup = bs(r.content, 'lxml')
 
@@ -53,16 +56,21 @@ def get_metadata():
     print(soup)
     # -------------
     info = soup.find('div', class_='group-info-item group-loc')
-    admin = info.find('a')
-    admin_name = admin.text.strip()
-    print("admin_name:" + admin_name)
+    if info is not None:
+        admin = info.find('a')
+        admin_name = admin.text.strip()
+        print("admin_name:" + admin_name)
 
-    admin_url = admin['href']
-    print("admin_url:" + admin_url)
+        admin_url = admin['href']
+        print("admin_url:" + admin_url)
 
-    # to find date
-    date = re.search('[\d][\d][\d][\d]-[\d][\d]-[\d][\d]', info.text.strip()).group()
-    print("date:" + date)
+        # to find date
+        date = re.search('[\d][\d][\d][\d]-[\d][\d]-[\d][\d]', info.text.strip()).group()
+        print("date:" + date)
+
+        data['admin'] = admin_name
+        data['admin_url'] = admin_url
+        data['created_time'] = date
 
     # --------------
     label_tag = soup.find('div', class_='group-info-item group-tags')
@@ -84,9 +92,6 @@ def get_metadata():
         recently_joined.append(li.text.strip())
 
     data['name'] = soup.find('title').text.strip()    
-    data['admin'] = admin_name
-    data['admin_url'] = admin_url
-    data['created_time'] = date
     data['group_labels'] = ', '.join(labels)
     data['member_count'] = member_count
     data['recently_joined'] =  ', '.join(recently_joined)
@@ -111,7 +116,9 @@ def task1A(connection):
 
     for page in range(start_page, end_page):
         print("page:", page)
-        url = f'https://www.douban.com/group/707650/members?start={page}'
+
+        #url = f'https://www.douban.com/group/707650/members?start={page}'
+        url = SCRAPE_URL + f"/members?start={page}"
         r = req.get(url, headers=headers)
         soup = bs(r.content, 'lxml')
         
@@ -133,7 +140,20 @@ def task1A(connection):
             data['url'] = link
             length, _ = get_data_from_db("url", link, "users", connection) 
             if length > 0:
+                if 0:
+                    task1_joins(link, name, connection) # joined groups info for each user
+                    task1C_books(books_info, link, connection) # books_info
+                    task1C_movies(movies_info, link, connection) # get movie info
+
+                    # get followers and following
+                    social_network_info = task1D(social_network_info, link, name, connection)
+
+                    #user_df = user_df.append(data, ignore_index=True)
+                    member_id += 1
+                    sleep(randint(SLEEP_MIN, SLEEP_MAX))
+
                 print("user already in db, pass....")  
+
                 continue
 
             p = req.get(link, headers=headers)
@@ -157,7 +177,7 @@ def task1A(connection):
                 else:
                     print("Can't find user-info, print page_soup")
                     print(page_soup)
-                    date_joined = None
+                    date_joined = "用户已注销"
             except AttributeError:
                 date_joined = None
 
@@ -220,18 +240,9 @@ def task1A(connection):
             print("data:", data)
             insert_data_to_db(data, "users", connection)
             
-#            task1_joins(link, data['Name']) # joined groups info for each user
-#            task1C_books(books_info, link, connection) # books_info
-#            print("task1C_movies begin...")
-#            task1C_movies(movies_info, link, connection) # get movie info
-#            print("task1C_movies end...")
-#
-            joins = threading.Thread(target=task1_joins, args=(link, data['Name'])) # joined groups info for each user
-            joins.start()
+            task1_joins(link, data['Name'], connection) # joined groups info for each user
             task1C_books(books_info, link, connection) # books_info
             task1C_movies(movies_info, link, connection) # get movie info
-
-
 
             # get followers and following
             social_network_info = task1D(social_network_info, link, name, connection)
@@ -322,7 +333,7 @@ def task1C_books(books_info, link, connection):
                 try:
                     name = bsoup.select_one('#wrapper > h1 > span').text.strip()    
                 except AttributeError:
-                    name = None
+                    name = "name_random_" + str(randint(1,1000000))
 
                 # Validates if the book is already in the dataframe, if yes continue
                 if len(books_info.loc[books_info['url'] == book]) != 0:
@@ -354,14 +365,17 @@ def task1C_books(books_info, link, connection):
                     info = ''
 
                 print("*" * 40)
+                print("name:", name)
                 print("info: ", info)
 
                 # Find the date
                 try: date = re.search('[\d][\d][\d][\d]-\d*', info).group() 
                 except AttributeError: date = ""
 
-                try: isbn = re.search(r'ISBN: (\d*)', info).group(1)
-                except AttributeError: isbn = ""
+                try: 
+                    isbn = re.search(r'ISBN: (\d*)', info).group(1)
+                except AttributeError: 
+                    isbn = "isbn_random_" + str(randint(1,1000000))
 
                 try: pages = re.search(r'页数: (\d*)', info).group(1)
                 except AttributeError: pages = ""
@@ -670,12 +684,12 @@ def task1C_movies(movies_info, link, connection):
                 except AttributeError:
                     pass
                 
+                insert_data_to_db(data, "movies_info", connection)
                 #movies_info = movies_info.append(data, ignore_index=True)
-                length, _ = get_data_from_db("url", movie, "movies_info", connection) 
-                if length == 0:
-                    insert_data_to_db(data, "movies_info", connection)
-                else:
-                    print("movies already in db, pass....")            
+                #length, _ = get_data_from_db("url", movie, "movies_info", connection) 
+                #if length == 0:
+                #else:
+                #    print("movies already in db, pass....")            
 
                 print("movies link counter:" + str(counter))
                 counter += 1
@@ -845,7 +859,17 @@ def task1D(network_info, link, name, connection):
     
     return network_info
 
-def task1_joins(link, member_id):
+def task1_joins(link, member_id, connection):
+
+    len, _ = get_data_from_db("UserUrl", link, "user_joined_groups", connection)
+
+    if len > 0:
+        print("The user's grouped joined info has been processed. Pass...")
+        return
+
+    data = {}
+    data["UserUrl"] = link
+
     link += 'joins'
     link = link.replace('/people', '/group/people')
     print("task1_joins link:", link)
@@ -854,11 +878,18 @@ def task1_joins(link, member_id):
     soup = bs(r.content, 'lxml')
     
     groups = soup.select('.group-list.group-cards li div.title')
-    names = [group.text.strip() for group in groups]
+    names_list = [group.text.strip() for group in groups]
+
+    names = ":".join(names_list)
+
+    data["GroupName"] = names[:4086]
+
+    insert_data_to_db(data, "user_joined_groups", connection)
+    print("User_Joined_Groups: Insert record successfully.")
     
-    df = pd.Series(names, name='group_name')
+    #df = pd.Series(names, name='group_name')
     
-    df.to_excel(output_dir + f'u{member_id}_joined_groups_info.xlsx', index=False)
+    #df.to_excel(output_dir + f'u{member_id}_joined_groups_info.xlsx', index=False)
     
 def task2A():
     df = pd.DataFrame(columns=['TopicID', 'TopicName', 'Author', 'Comments', 'LastCommentTime'])
@@ -866,7 +897,8 @@ def task2A():
     page = 0
     while page <= 35000:
         print(page)
-        url = f'https://www.douban.com/group/707650/discussion?start={page}&type=new'
+        #url = f'https://www.douban.com/group/707650/discussion?start={page}&type=new'
+        url = SCRAPE_URL + f"/discussion?start={page}&type=new"
 
         r = req.get(url, headers=headers)
         print('gotten')
@@ -946,7 +978,7 @@ def task2B(link, connection):
 if __name__ == '__main__':
     try:
         connection = mysql.connector.connect(user='james',
-                                    database='douban',
+                                    database='douban_small',
                                     password='tiger',
                                     host='127.0.0.1')
 
