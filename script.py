@@ -140,7 +140,7 @@ def task1A(connection):
             data['url'] = link
             length, _ = get_data_from_db("url", link, "users", connection) 
             if length > 0:
-                if 0:
+                if 1:
                     task1_joins(link, name, connection) # joined groups info for each user
                     task1C_books(books_info, link, connection) # books_info
                     task1C_movies(movies_info, link, connection) # get movie info
@@ -253,14 +253,14 @@ def task1A(connection):
             sleep(randint(SLEEP_MIN, SLEEP_MAX))
             
     
-    books_info_df = pd.read_sql("select * from douban.books_info", connection)
-    movies_info_df = pd.read_sql("select * from douban.movies_info", connection)
-    # Create the excel files
-    books_info_df.to_excel(output_dir + 'books_info.xlsx', index=False)
-    movies_info_df.to_excel(output_dir + 'movies_info.xlsx', index=False)
-    social_network_info.to_excel(output_dir + 'task1D.xlsx', index=False)
+    #books_info_df = pd.read_sql("select * from books_info", connection)
+    #movies_info_df = pd.read_sql("select * from movies_info", connection)
+    ## Create the excel files
+    #books_info_df.to_excel(output_dir + 'books_info.xlsx', index=False)
+    #movies_info_df.to_excel(output_dir + 'movies_info.xlsx', index=False)
+    #social_network_info.to_excel(output_dir + 'task1D.xlsx', index=False)
             
-    user_df.to_excel(output_dir+'task1A.xlsx', index=False)
+    #user_df.to_excel(output_dir+'task1A.xlsx', index=False)
     
 
 def task1C_books(books_info, link, connection): 
@@ -755,7 +755,6 @@ def task1C_movies(movies_info, link, connection):
                 data['UserUrl'] = link
 
                 insert_data_to_db(data, "user_movies_behaviours", connection)
-                print("Insert record successfully.")
                 sleep(randint(SLEEP_MIN,SLEEP_MAX))
         
     return movies_info
@@ -900,77 +899,214 @@ def task2A():
         #url = f'https://www.douban.com/group/707650/discussion?start={page}&type=new'
         url = SCRAPE_URL + f"/discussion?start={page}&type=new"
 
+        print("url:", url)
+
         r = req.get(url, headers=headers)
+
+        if r.status_code != 200:
+            print("the request is abnormal, stop...")
+            break
+
         print('gotten')
         soup = bs(r.content, features='lxml')
         try:
             div = soup.select_one('#content > div > div.article')
             table = div.find('table')        
+            if not table :
+                print("Nothing found, return.")
+                return
+
             for row in table.find_all('tr', class_=''):
                 data = {}
                 
                 link = row.find('a')['href']
+                print("task2Alink:", link)
                 topic_id = re.search('/(\d+)/', link).group(1)
-                data['TopicID'] = topic_id
+                discussion_obj = re.search('/(\d+)/.+/(\d+)/', link)
+
+                is_discussion = False
+                if discussion_obj is None or discussion_obj == "":
+                    data['TopicID'] = topic_id
+                else:
+                    topic_id =  discussion_obj.group(2)
+                    data['TopicID'] = topic_id
+                    is_discussion = True
+                    
                 data['TopicName'], data['Author'], data['Comments'], data['LastCommentTime'] = [td.text.strip() for td in row.find_all('td')]
+
+                print(f"TopicID:{topic_id}, TopicName:{data['TopicName']}")
 
                 length, _ = get_data_from_db("TopicID", topic_id, "discussion_threads_statistics", connection) 
                 if length > 0:
                     print("this discuss thread info have been in database, pass.")
+                    if is_discussion:
+                        task2B_discussion(link, connection)
+                    else:
+                        task2B(link, connection)
+                    sleep(randint(SLEEP_MIN,SLEEP_MAX))
                     continue
                 else:
+                    print("Task2A data:", data)
                     insert_data_to_db(data, "discussion_threads_statistics", connection)
-                    print("Insert record successfully.")
                 
-                #df = df.append(data, ignore_index=True)
-                task2B(link, connection)
+                if is_discussion:
+                    task2B_discussion(link, connection)
+                else:
+                    task2B(link, connection)
                 sleep(randint(SLEEP_MIN,SLEEP_MAX))
             
             page += 25
-        except AttributeError:
+        except AttributeError as e:
+            print("error:", e)
             print('Retrying: ', page)
             continue
     
     #df.to_excel(output_dir + 'task2A.xlsx', index=False)
 
+def task2B_discussion(link, connection):
+    topic_id = re.search('/(\d+)/.+/(\d+)/', link).group(2)
+    topic_columns = ['OriginalPostText', 'Replies', 'UserNameWhoReplies', 'No_of_Likes', 'DateTime', 'url']
+    data = {}
+    print("link2B_discussion:", link)
+    r = req.get(link, headers=headers)
+    if r.status_code != 200:
+        print("request error: return.")
+        return
+
+    soup = bs(r.content, 'lxml')
+
+    for replyC in soup.find_all('div', class_='comment-item'):
+        try:
+            data={}
+            id = replyC['id']
+            data['ID'] = id
+
+            content = soup.find(id='link-report').find('p').text.strip()
+
+            if content is None or content == "":
+                content = "None"
+            else:
+                print("content:", content)
+
+            length, _ = get_data_from_db('ID', id, "topic_infos", connection)
+            if length > 0:
+                print("discussion info has been proceed, pass.")
+                continue
+
+            reply = replyC.find("div", class_="content report-comment")
+            if reply is None:
+                print("reply is not found, error., return")
+                return 
+
+            data['OriginalPostText'] = content
+
+            replies = reply.find('p').text.strip()#  Reply text
+            if replies is None:
+                print("replies error, return.")
+                return
+            else:
+                data['Replies'] = replies
+                print("Replies:", data['Replies'])
+
+            authorText = reply.find("div", class_="author").find('a').text.strip()
+            print("author:", authorText)
+            pubTime = reply.find("div", class_="author").find('span').text.strip()
+            print("pubTime:", pubTime)
+
+            likesText = reply.find("div", class_='op-lnks').find('a', class_='comment-vote cls_abnormal').text.strip()
+
+            print("likesText:", likesText)
+            if likesText is None or likesText == "" :
+                likesText = "None"
+
+            data['UserNameWhoReplies'] = authorText
+            data['No_of_Likes'] = likesText
+            data['url'] = link
+            data['PubTime'] = pubTime
+            data['TopicID'] = topic_id
+
+            insert_data_to_db(data, "topic_infos", connection)
+            print("data:", data)
+            print("insert record into topic_infos")
+        except AttributeError as e:
+            print("error:", e)
+        
+        
+
 def task2B(link, connection):
     
     topic_id = re.search('/(\d+)/', link).group(1)
+
     topic_columns = ['OriginalPostText', 'Replies', 'UserNameWhoReplies', 'No_of_Likes', 'DateTime', 'url']
     df = pd.DataFrame(columns=topic_columns)
     
     data = {}
     
+    print("link2B:", link)
     r = req.get(link, headers=headers)
+    if r.status_code != 200:
+        print("request error: return.")
+        return
+
     soup = bs(r.content, 'lxml')
     
     # Original post text
     content = soup.find('div', class_='rich-content topic-richtext').text.strip()
-    data['OriginalPostText'] = content
+    if content is None or content == "":
+        content = "None"
     
     for reply in soup.find_all('li', class_='clearfix comment-item reply-item'):
+
+        id = reply['id']
+        data['ID'] = id
+        print("reply.id:", id)
+        if id is None or id == "":
+            print("reply id is None.... return")
+            return
+
+        length, _ = get_data_from_db('ID', id, "topic_infos", connection)
+        if length > 0:
+            print("discussion info has been proceed, pass.")
+            continue
+
+
+        data['OriginalPostText'] = content
+
         data['Replies'] = reply.find('p', 'reply-content').text.strip()#  Reply text
         
         head = reply.find('h4')
         data['UserNameWhoReplies'] = head.a.text.strip()
+
         
         data['PubTime'] = head.find('span', class_='pubtime').text.strip()
         data['url'] = link
+        data['TopicID'] = topic_id
         
         try:
             # Likes doenst show every time
             likes = reply.find('div', class_='operation-div').text.strip()
             likes = re.search('(\d+)', likes).group()
+
+            print("likes: ", likes)
+
+            if likes is None or likes == "":
+                likes = "None"
+
             data['No_of_Likes'] = likes
+
         except AttributeError:
+            print("Likes parse error...")
+            data['No_of_Likes'] = "None"
             pass
         
 
         insert_data_to_db(data, "topic_infos", connection)
+        print("data:", data)
+        print("insert record into topic_infos")
         #df = df.append(data, ignore_index=True)
         data = {}
         # So it wont repeat post_text for other rows
-        data['OriginalPostText'] = None
+        #data['OriginalPostText'] = None
         
         
     #df.to_excel(output_dir + f'task2B_{topic_id}.xlsx', index=False)
@@ -984,7 +1120,7 @@ if __name__ == '__main__':
 
         connection.set_charset_collation('utf8mb4', 'utf8mb4_general_ci')
 
-        get_metadata()
+        #get_metadata()
         task1A(connection) 
         #task2A()
 
