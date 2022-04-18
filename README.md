@@ -1,1 +1,2 @@
-"# douban_scrawlere" 
+# douban_scrawler 
+这是2022年写的豆瓣爬虫，目前只做到了单进程爬取，没有加入ip池，仅供学习研究使用。
